@@ -151,22 +151,36 @@ public:
     in_stream.read(reinterpret_cast<char*>(&n), sizeof(FingerprintN));
     Rcpp::Rcout << "Reading " << n << " fingerprints from file\n";
 
+    int start_second_block;
+    in_stream.read(reinterpret_cast<char*>(&start_second_block), sizeof(int));
+    Rcpp::Rcout << "Names start at " << start_second_block << " bytes\n";
+
     compressed_buffer.resize(file_size - in_stream.tellg());
     in_stream.read(compressed_buffer.data(), compressed_buffer.size());
+    if (in_stream)
+      Rcpp::Rcout << "all characters read successfully.\n";
+    else
+      Rcpp::Rcout << "error: only " << in_stream.gcount() << " could be read\n";
     in_stream.close();
+
+    Rcpp::Rcout << "Read file\n";
 
     fps.resize(n);
     fp_names.resize(n);
 
+    Rcpp::Rcout << "Resized\n";
+
     LZ4_streamDecode_t* decompress_stream = LZ4_createStreamDecode();
+
     int bytes_decompressed;
     bytes_decompressed = LZ4_decompress_safe_continue(
       decompress_stream,
       compressed_buffer.data(),
       reinterpret_cast<char*>(fps.data()),
-      compressed_buffer.size(),
+      start_second_block,
       n * sizeof(Fingerprint)
     );
+    Rcpp::Rcout << "Decompressed fingerprints\n";
     if (bytes_decompressed != n * sizeof(Fingerprint)) {
       Rcpp::stop(
         "Decompression error in fingerprints:\nExpected bytes: %i\nReceived bytes: %i",
@@ -177,14 +191,17 @@ public:
 
     bytes_decompressed = LZ4_decompress_safe_continue(
       decompress_stream,
-      compressed_buffer.data() + bytes_decompressed,
+      compressed_buffer.data() + start_second_block,
       reinterpret_cast<char*>(fp_names.data()),
-      compressed_buffer.size() - bytes_decompressed,
+      compressed_buffer.size() - start_second_block,
       n * sizeof(FingerprintName)
     );
+    Rcpp::Rcout << "Decompressed names\n";
     if (bytes_decompressed != n * sizeof(FingerprintName)) {
       Rcpp::stop(
-        "Decompression error in names\nExpected bytes: %i\nReceived bytes: %i",
+        "Decompression error in names\nReading from: %p\nReading to: %p\nExpected bytes: %i\nReceived bytes: %i",
+        compressed_buffer.data() + start_second_block,
+        compressed_buffer.data() + compressed_buffer.size(),
         n * sizeof(FingerprintName),
         bytes_decompressed
       );
@@ -262,8 +279,11 @@ public:
       max_compressed_bytes
     );
     Rcpp::Rcout << "Compressed\n";
+    // Save number of bytes of the compressed data. Important for finding
+    // second block with names for decompression
+    out_stream.write(reinterpret_cast<char*>(&compressed_bytes), sizeof(int));
     out_stream.write(cmp_buf.data(), compressed_bytes);
-    Rcpp::Rcout << "Wrote\n";
+    Rcpp::Rcout << "Wrote " << compressed_bytes << " bytes compressed data\n";
 
     max_compressed_bytes = LZ4_COMPRESSBOUND(fps.size() * sizeof(FingerprintName));
     cmp_buf.resize(max_compressed_bytes);
