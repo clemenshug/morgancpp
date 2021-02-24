@@ -247,7 +247,7 @@ public:
   }
 
   // Save binary fp file
-  void save_file(const std::string& filename, const int& compression_level=8) {
+  void save_file(const std::string& filename, const int& compression_level=50) {
     if (compression_level < 0 || compression_level > 100)
       Rcpp::stop("Compression level must be between 0 and 100");
 
