@@ -1,1 +1,11 @@
 PKG_CXXFLAGS=--std=c++14 -O2 -mpopcnt -mavx -mtune=haswell
+PKG_CPPFLAGS=-I. -Ilz4
+PKG_LIBS=-L. -lLZ4
+
+LIBLZ4  = lz4/lz4.o lz4/lz4hc.o
+
+$(SHLIB): libLZ4.a
+
+libLZ4.a: $(LIBLZ4)
+	$(AR) rcs libLZ4.a $(LIBLZ4)
+

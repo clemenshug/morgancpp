@@ -1,7 +1,10 @@
 #include <Rcpp.h>
 #include <zlib.h>
+#include "lz4/lz4hc.h"
 #include <array>
+#include <vector>
 #include <fstream>
+#include <iostream>
 #include <string>
 #include <algorithm>
 
@@ -191,16 +194,57 @@ public:
 
   // Save binary fp file
   void save_file(const std::string& filename, const int& compression_level=8) {
-    if (compression_level < -1 || compression_level > 9)
-      Rcpp::stop("Compression level must be between -1 and 9");
-    char out_mode [4];
-    sprintf(out_mode, "wb%i", compression_level);
-    gzFile out_stream = gzopen(filename.c_str(), out_mode);
+    if (compression_level < 0 || compression_level > 100)
+      Rcpp::stop("Compression level must be between 0 and 100");
+
     FingerprintN n = fps.size();
-    gzwrite(out_stream, reinterpret_cast<char*>(&n), sizeof(FingerprintN));
-    gzwrite(out_stream, reinterpret_cast<char*>(fps.data()), size());
-    gzwrite(out_stream, reinterpret_cast<char*>(fp_names.data()), fps.size() * sizeof(FingerprintName));
-    gzclose(out_stream);
+
+    std::ofstream out_stream;
+    out_stream.open(filename, std::ios::out | std::ios::binary | std::ios::trunc);
+
+    out_stream.write("MORGANFPS", 9);
+    out_stream.write(reinterpret_cast<char*>(&n), sizeof(FingerprintN));
+
+    LZ4_streamHC_t lz4Stream_body = LZ4_streamHC_t();
+    LZ4_streamHC_t* compress_stream = &lz4Stream_body;
+    LZ4_resetStreamHC_fast(compress_stream, compression_level);
+
+    Rcpp::Rcout << "After opening stream\n";
+
+    int max_compressed_bytes;
+    int compressed_bytes;
+    std::vector<char> cmp_buf;
+
+    max_compressed_bytes = LZ4_COMPRESSBOUND(size());
+    cmp_buf.resize(max_compressed_bytes);
+    Rcpp::Rcout << "Resizing\n";
+    compressed_bytes = LZ4_compress_HC_continue(
+      compress_stream,
+      reinterpret_cast<char*>(fps.data()),
+      cmp_buf.data(),
+      size(),
+      max_compressed_bytes
+    );
+    Rcpp::Rcout << "Compressed\n";
+    out_stream.write(cmp_buf.data(), compressed_bytes);
+    Rcpp::Rcout << "Wrote\n";
+
+    max_compressed_bytes = LZ4_COMPRESSBOUND(fps.size() * sizeof(FingerprintName));
+    cmp_buf.resize(max_compressed_bytes);
+    Rcpp::Rcout << "Resized\n";
+    compressed_bytes = LZ4_compress_HC_continue(
+      compress_stream,
+      reinterpret_cast<char*>(fp_names.data()),
+      cmp_buf.data(),
+      fps.size() * sizeof(FingerprintName),
+      max_compressed_bytes
+    );
+    Rcpp::Rcout << "Compressed\n";
+    out_stream.write(cmp_buf.data(), compressed_bytes);
+    Rcpp::Rcout << "Wrote\n";
+
+    out_stream.close();
+    // LZ4_freeStreamHC(compress_stream);
   }
 
   // Size of the dataset
