@@ -134,26 +134,63 @@ public:
 
   // Constructor accepts a file path to load fingerprints from binary file
   MorganFPS(const std::string& filename, const bool from_file) {
-    gzFile in_stream = gzopen(filename.c_str(), "rb");
-    if (!in_stream) {
-      Rcpp::stop("gzopen of " + filename + " failed: " + strerror(errno));
+    std::ifstream in_stream;
+    in_stream.open(filename, std::ios::in | std::ios::binary | std::ios::ate);
+    std::streampos file_size = in_stream.tellg();
+    std::vector<char> compressed_buffer;
+
+    compressed_buffer.resize(9);
+    in_stream.seekg (0, in_stream.beg);
+    in_stream.read(compressed_buffer.data(), 9);
+    std::string magic (compressed_buffer.begin(), compressed_buffer.end());
+    if (magic != "MORGANFPS") {
+      Rcpp::stop("File is incompatible, doesn't start with 'MORGANFPS': '%s'", magic.c_str());
     }
+
     FingerprintN n;
-    gzread(in_stream, reinterpret_cast<char*>(&n), sizeof(FingerprintN));
+    in_stream.read(reinterpret_cast<char*>(&n), sizeof(FingerprintN));
+    Rcpp::Rcout << "Reading " << n << " fingerprints from file\n";
+
+    compressed_buffer.resize(file_size - in_stream.tellg());
+    in_stream.read(compressed_buffer.data(), compressed_buffer.size());
+    in_stream.close();
+
     fps.resize(n);
     fp_names.resize(n);
-    int bytes_read;
-    bytes_read = gzread(in_stream, reinterpret_cast<char*>(fps.data()), n * sizeof(Fingerprint));
-    if (bytes_read != n * sizeof(Fingerprint)) {
-      gzclose(in_stream);
-      Rcpp::stop("Error reading gzipped fingerprints. Bad file?");
+
+    LZ4_streamDecode_t* decompress_stream = LZ4_createStreamDecode();
+    int bytes_decompressed;
+    bytes_decompressed = LZ4_decompress_safe_continue(
+      decompress_stream,
+      compressed_buffer.data(),
+      reinterpret_cast<char*>(fps.data()),
+      compressed_buffer.size(),
+      n * sizeof(Fingerprint)
+    );
+    if (bytes_decompressed != n * sizeof(Fingerprint)) {
+      Rcpp::stop(
+        "Decompression error in fingerprints:\nExpected bytes: %i\nReceived bytes: %i",
+        n * sizeof(Fingerprint),
+        bytes_decompressed
+      );
     }
-    bytes_read = gzread(in_stream, reinterpret_cast<char*>(fp_names.data()), n * sizeof(FingerprintName));
-    if ((bytes_read != n * sizeof(FingerprintName))) {
-      gzclose(in_stream);
-      Rcpp::stop("Error reading gzipped fingerprint names. Bad file?");
+
+    bytes_decompressed = LZ4_decompress_safe_continue(
+      decompress_stream,
+      compressed_buffer.data() + bytes_decompressed,
+      reinterpret_cast<char*>(fp_names.data()),
+      compressed_buffer.size() - bytes_decompressed,
+      n * sizeof(FingerprintName)
+    );
+    if (bytes_decompressed != n * sizeof(FingerprintName)) {
+      Rcpp::stop(
+        "Decompression error in names\nExpected bytes: %i\nReceived bytes: %i",
+        n * sizeof(FingerprintName),
+        bytes_decompressed
+      );
     }
-    gzclose(in_stream);
+
+    LZ4_freeStreamDecode(decompress_stream);
   }
 
   // Tanimoto similarity between drugs i and j
@@ -205,8 +242,7 @@ public:
     out_stream.write("MORGANFPS", 9);
     out_stream.write(reinterpret_cast<char*>(&n), sizeof(FingerprintN));
 
-    LZ4_streamHC_t lz4Stream_body = LZ4_streamHC_t();
-    LZ4_streamHC_t* compress_stream = &lz4Stream_body;
+    LZ4_streamHC_t* compress_stream = LZ4_createStreamHC();
     LZ4_resetStreamHC_fast(compress_stream, compression_level);
 
     Rcpp::Rcout << "After opening stream\n";
@@ -244,7 +280,7 @@ public:
     Rcpp::Rcout << "Wrote\n";
 
     out_stream.close();
-    // LZ4_freeStreamHC(compress_stream);
+    LZ4_freeStreamHC(compress_stream);
   }
 
   // Size of the dataset
