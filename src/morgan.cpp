@@ -13,7 +13,7 @@ using FingerprintName = std::int32_t;
 using FingerprintN = std::uint64_t;
 
 enum {
-  MESSAGE_MAX_BYTES   = 1024
+  MESSAGE_MAX_BYTES   = 1024 * 1024
 };
 
 #define CMPBUFSIZE (LZ4_COMPRESSBOUND(MESSAGE_MAX_BYTES))
@@ -72,19 +72,19 @@ int lz4_decompress(char* out_buffer, const char* in_buffer)
   static char decBuf[DECODER_RING_BUFFER_SIZE];
   std::size_t decBufOffset = 5;
 
-  Rcpp::Rcout << "Using a " << DECODER_RING_BUFFER_SIZE << " byte decoding ring buffer\n";
+  // Rcpp::Rcout << "Using a " << DECODER_RING_BUFFER_SIZE << " byte decoding ring buffer\n";
 
   for(;;) {
     int const inpBytes = *reinterpret_cast<const int *>(in_buffer + inpOffset);
     inpOffset += sizeof(int);
-    Rcpp::Rcout << "Reading " << inpBytes << " bytes\n";
+    // Rcpp::Rcout << "Reading " << inpBytes << " bytes\n";
     if (inpBytes <= 0)
       break;
 
     char* const decPtr = &decBuf[decBufOffset];
-    Rcpp::Rcout << "Decode buffer offset is " << decBufOffset << " bytes\n";
-    Rcpp::Rcout << "Input buffer offset is " << inpOffset << " bytes\n";
-    Rcpp::Rcout << "Output buffer offset is " << outOffset << " bytes\n";
+    // Rcpp::Rcout << "Decode buffer offset is " << decBufOffset << " bytes\n";
+    // Rcpp::Rcout << "Input buffer offset is " << inpOffset << " bytes\n";
+    // Rcpp::Rcout << "Output buffer offset is " << outOffset << " bytes\n";
     int const decBytes = LZ4_decompress_safe_continue(
       lz4Stream,
       in_buffer + inpOffset,
@@ -92,7 +92,7 @@ int lz4_decompress(char* out_buffer, const char* in_buffer)
       inpBytes,
       MESSAGE_MAX_BYTES
     );
-    Rcpp::Rcout << "Decompressed into " << decBytes << " bytes\n";
+    // Rcpp::Rcout << "Decompressed into " << decBytes << " bytes\n";
     if(decBytes <= 0)
       break;
 
@@ -104,7 +104,7 @@ int lz4_decompress(char* out_buffer, const char* in_buffer)
     decBufOffset += decBytes;
     // Wraparound the ringbuffer offset
     if(decBufOffset >= DECODER_RING_BUFFER_SIZE - MESSAGE_MAX_BYTES) {
-      Rcpp::Rcout << "Wrap ring buffer\n";
+      // Rcpp::Rcout << "Wrap ring buffer\n";
       decBufOffset = 0;
     }
   }
