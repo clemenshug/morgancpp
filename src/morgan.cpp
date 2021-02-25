@@ -27,33 +27,33 @@ int test_compress(char* out_buffer, const char* in_buffer, std::size_t in_size, 
 
   std::size_t inpOffset = 0;
   std::size_t outOffset = 0;
+  std::size_t cmpBufOffset = 0;
 
   for(;;) {
+    char cmpBuf[CMPBUFSIZE];;
+
     int inpBytes = in_size - inpOffset;
     if (0 == inpBytes)
       break;
     if (inpBytes > MESSAGE_MAX_BYTES)
       inpBytes = MESSAGE_MAX_BYTES;
 
-    {
-      char cmpBuf[CMPBUFSIZE];
-      const int cmpBytes = LZ4_compress_HC_continue(
-        lz4Stream,
-        in_buffer + inpOffset,
-        cmpBuf,
-        inpBytes,
-        CMPBUFSIZE
-      );
-      if(cmpBytes <= 0)
-        break;
-      inpOffset += inpBytes;
+    const int cmpBytes = LZ4_compress_HC_continue(
+      lz4Stream,
+      in_buffer + inpOffset,
+      cmpBuf,
+      inpBytes,
+      CMPBUFSIZE
+    );
+    if(cmpBytes <= 0)
+      break;
+    inpOffset += inpBytes;
 
-      memcpy(out_buffer + outOffset, reinterpret_cast<const char *>(&cmpBytes), sizeof(int));
-      outOffset += sizeof(int);
+    memcpy(out_buffer + outOffset, reinterpret_cast<const char *>(&cmpBytes), sizeof(int));
+    outOffset += sizeof(int);
 
-      memcpy(out_buffer + outOffset, cmpBuf, cmpBytes);
-      outOffset += cmpBytes;
-    }
+    memcpy(out_buffer + outOffset, cmpBuf, cmpBytes);
+    outOffset += cmpBytes;
   }
 
   memcpy(out_buffer + outOffset, reinterpret_cast<const char *>(&ZERO), sizeof(int));
@@ -69,37 +69,37 @@ int test_decompress(char* out_buffer, const char* in_buffer)
 
   std::size_t inpOffset = 0;
   std::size_t outOffset = 0;
+  static char decBuf[RING_BUFFER_BYTES];
+  std::size_t decBufOffset = 0;
 
   for(;;) {
-    int cmpBytes;
-    int inpBytes;
-    char decBuf[CMPBUFSIZE];
+    int const inpBytes = *reinterpret_cast<const int *>(in_buffer + inpOffset);
+    inpOffset += sizeof(int);
+    Rcpp::Rcout << "Reading " << inpBytes << " bytes\n";
+    if (inpBytes <= 0)
+      break;
 
-    {
-      inpBytes = *reinterpret_cast<const int *>(in_buffer + inpOffset);
-      inpOffset += sizeof(int);
-      Rcpp::Rcout << "Reading " << inpBytes << " bytes\n";
-      if (inpBytes <= 0)
-        break;
-    }
+    char* const decPtr = &decBuf[decBufOffset];
+    int const cmpBytes = LZ4_decompress_safe_continue(
+      lz4Stream,
+      in_buffer + inpOffset,
+      decPtr,
+      inpBytes,
+      MESSAGE_MAX_BYTES
+    );
+    Rcpp::Rcout << "Decompressed into " << cmpBytes << " bytes\n";
+    if(cmpBytes <= 0)
+      break;
+    inpOffset += inpBytes;
 
-    {
-      cmpBytes = LZ4_decompress_safe_continue(
-        lz4Stream,
-        in_buffer + inpOffset,
-        decBuf,
-        inpBytes,
-        MESSAGE_MAX_BYTES
-      );
-      Rcpp::Rcout << "Decompressed into " << cmpBytes << " bytes\n";
-      if(cmpBytes <= 0)
-        break;
-      inpOffset += inpBytes;
+    memcpy(out_buffer + outOffset, decPtr, cmpBytes);
+    outOffset += cmpBytes;
 
-      memcpy(out_buffer + outOffset, decBuf, cmpBytes);
-      outOffset += cmpBytes;
-    }
+    // Wraparound the ringbuffer offset
+    if(decBufOffset >= RING_BUFFER_BYTES - MESSAGE_MAX_BYTES)
+      decBufOffset = 0;
   }
+
   return outOffset;
 }
 
