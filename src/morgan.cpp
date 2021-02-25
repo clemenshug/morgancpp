@@ -21,7 +21,7 @@ enum {
 
 const int ZERO = 0;
 
-int test_compress(char* out_buffer, const char* in_buffer, std::size_t in_size, const int compression_level) {
+int lz4_compress(char* out_buffer, const char* in_buffer, std::size_t in_size, const int compression_level) {
   LZ4_streamHC_t* lz4Stream = LZ4_createStreamHC();
   LZ4_resetStreamHC_fast(lz4Stream, compression_level);
 
@@ -63,14 +63,14 @@ int test_compress(char* out_buffer, const char* in_buffer, std::size_t in_size, 
 }
 
 
-int test_decompress(char* out_buffer, const char* in_buffer)
+int lz4_decompress(char* out_buffer, const char* in_buffer)
 {
   LZ4_streamDecode_t* lz4Stream = LZ4_createStreamDecode();
 
   std::size_t inpOffset = 0;
   std::size_t outOffset = 0;
   static char decBuf[DECODER_RING_BUFFER_SIZE];
-  std::size_t decBufOffset = 0;
+  std::size_t decBufOffset = 5;
 
   Rcpp::Rcout << "Using a " << DECODER_RING_BUFFER_SIZE << " byte decoding ring buffer\n";
 
@@ -82,25 +82,31 @@ int test_decompress(char* out_buffer, const char* in_buffer)
       break;
 
     char* const decPtr = &decBuf[decBufOffset];
-    int const cmpBytes = LZ4_decompress_safe_continue(
+    Rcpp::Rcout << "Decode buffer offset is " << decBufOffset << " bytes\n";
+    Rcpp::Rcout << "Input buffer offset is " << inpOffset << " bytes\n";
+    Rcpp::Rcout << "Output buffer offset is " << outOffset << " bytes\n";
+    int const decBytes = LZ4_decompress_safe_continue(
       lz4Stream,
       in_buffer + inpOffset,
       decPtr,
       inpBytes,
       MESSAGE_MAX_BYTES
     );
-    Rcpp::Rcout << "Decompressed into " << cmpBytes << " bytes\n";
-    if(cmpBytes <= 0)
+    Rcpp::Rcout << "Decompressed into " << decBytes << " bytes\n";
+    if(decBytes <= 0)
       break;
+
     inpOffset += inpBytes;
 
-    memcpy(out_buffer + outOffset, decPtr, cmpBytes);
-    outOffset += cmpBytes;
+    memcpy(out_buffer + outOffset, decPtr, decBytes);
+    outOffset += decBytes;
 
+    decBufOffset += decBytes;
     // Wraparound the ringbuffer offset
-    if(decBufOffset >= DECODER_RING_BUFFER_SIZE - MESSAGE_MAX_BYTES)
+    if(decBufOffset >= DECODER_RING_BUFFER_SIZE - MESSAGE_MAX_BYTES) {
       Rcpp::Rcout << "Wrap ring buffer\n";
       decBufOffset = 0;
+    }
   }
 
   return outOffset;
@@ -254,7 +260,7 @@ public:
     compressed_buffer.resize(size_next_block);
     in_stream.read(compressed_buffer.data(), size_next_block);
     Rcpp::Rcout << "Compressed fingerprints read\n";
-    int bytes_decompressed = test_decompress(
+    int bytes_decompressed = lz4_decompress(
       reinterpret_cast<char*>(fps.data()),
       compressed_buffer.data()
     );
@@ -272,7 +278,7 @@ public:
 
     compressed_buffer.resize(size_next_block);
     in_stream.read(compressed_buffer.data(), size_next_block);
-    bytes_decompressed = test_decompress(
+    bytes_decompressed = lz4_decompress(
       reinterpret_cast<char*>(fp_names.data()),
       compressed_buffer.data()
     );
@@ -339,7 +345,7 @@ public:
     out_stream.write(reinterpret_cast<char*>(&n), sizeof(FingerprintN));
 
     out_buffer.resize(LZ4_COMPRESSBOUND(fps.size() * sizeof(Fingerprint)));
-    const int fingerprints_compressed = test_compress(
+    const int fingerprints_compressed = lz4_compress(
       out_buffer.data(),
       reinterpret_cast<char *>(fps.data()),
       fps.size() * sizeof(Fingerprint),
@@ -354,7 +360,7 @@ public:
     Rcpp::Rcout << "Wrote fingerprints\n";
 
     out_buffer.resize(LZ4_COMPRESSBOUND(fp_names.size() * sizeof(FingerprintName)));
-    const int names_compressed = test_compress(
+    const int names_compressed = lz4_compress(
       out_buffer.data(),
       reinterpret_cast<char *>(fp_names.data()),
       fp_names.size() * sizeof(FingerprintName),
