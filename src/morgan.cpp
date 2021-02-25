@@ -93,8 +93,14 @@ int lz4_decompress(char* out_buffer, const char* in_buffer)
       MESSAGE_MAX_BYTES
     );
     // Rcpp::Rcout << "Decompressed into " << decBytes << " bytes\n";
-    if(decBytes <= 0)
+    if(decBytes <= 0) {
+      Rcpp::Rcout << "Decompression error. inpOffset: " << inpOffset << "\noutOffset: " << outOffset
+                  << "\ndecBufOffset: " << decBufOffset << "\ninpBytes: " << inpBytes
+                  << "\ndecBytes: " << decBytes << "\nDECODER_RING_BUFFER_SIZE: " << DECODER_RING_BUFFER_SIZE
+                  << "\nMESSAGE_MAX_BYTES: " << MESSAGE_MAX_BYTES << "\n";
       break;
+    }
+
 
     inpOffset += inpBytes;
 
