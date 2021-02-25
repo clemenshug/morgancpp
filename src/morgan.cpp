@@ -14,8 +14,7 @@ using FingerprintN = std::uint64_t;
 
 enum {
   MESSAGE_MAX_BYTES   = 1024,
-  RING_BUFFER_BYTES   = 1024 * 8 + MESSAGE_MAX_BYTES,
-  DEC_BUFFER_BYTES    = RING_BUFFER_BYTES
+  RING_BUFFER_BYTES   = 1024 * 8 + MESSAGE_MAX_BYTES
 };
 
 const int ZERO = 0;
@@ -26,21 +25,19 @@ int test_compress(char* out_buffer, const char* in_buffer, std::size_t in_size, 
   LZ4_streamHC_t* lz4Stream = LZ4_createStreamHC();
   LZ4_resetStreamHC_fast(lz4Stream, compression_level);
 
-  static std::size_t inpOffset = 0;
-  static std::size_t outOffset = 0;
-  static int inpBytes;
-  static int cmpBytes;
-  static char cmpBuf[CMPBUFSIZE];
+  std::size_t inpOffset = 0;
+  std::size_t outOffset = 0;
 
   for(;;) {
-    inpBytes = in_size - inpOffset;
+    int inpBytes = in_size - inpOffset;
     if (0 == inpBytes)
       break;
     if (inpBytes > MESSAGE_MAX_BYTES)
       inpBytes = MESSAGE_MAX_BYTES;
 
     {
-      cmpBytes = LZ4_compress_HC_continue(
+      char cmpBuf[CMPBUFSIZE];
+      const int cmpBytes = LZ4_compress_HC_continue(
         lz4Stream,
         in_buffer + inpOffset,
         cmpBuf,
@@ -51,7 +48,7 @@ int test_compress(char* out_buffer, const char* in_buffer, std::size_t in_size, 
         break;
       inpOffset += inpBytes;
 
-      memcpy(out_buffer + outOffset, reinterpret_cast<char *>(&cmpBytes), sizeof(int));
+      memcpy(out_buffer + outOffset, reinterpret_cast<const char *>(&cmpBytes), sizeof(int));
       outOffset += sizeof(int);
 
       memcpy(out_buffer + outOffset, cmpBuf, cmpBytes);
@@ -66,44 +63,45 @@ int test_compress(char* out_buffer, const char* in_buffer, std::size_t in_size, 
 }
 
 
-// void test_decompress(FILE* outFp, FILE* inpFp)
-// {
-//   static char decBuf[DEC_BUFFER_BYTES];
-//   int decOffset = 0;
-//   LZ4_streamDecode_t lz4StreamDecode_body = { 0 };
-//   LZ4_streamDecode_t* lz4StreamDecode = &lz4StreamDecode_body;
-//
-//   for(;;) {
-//     int  cmpBytes = 0;
-//     char cmpBuf[CMPBUFSIZE];
-//
-//     {   const size_t r0 = read_int32(inpFp, &cmpBytes);
-//       size_t r1;
-//       if(r0 != 1 || cmpBytes <= 0)
-//         break;
-//
-//       r1 = read_bin(inpFp, cmpBuf, cmpBytes);
-//       if(r1 != (size_t) cmpBytes)
-//         break;
-//     }
-//
-//     {   char* const decPtr = &decBuf[decOffset];
-//       const int decBytes = LZ4_decompress_safe_continue(
-//         lz4StreamDecode, cmpBuf, decPtr, cmpBytes, MESSAGE_MAX_BYTES);
-//       if(decBytes <= 0)
-//         break;
-//
-//       decOffset += decBytes;
-//       write_bin(outFp, decPtr, decBytes);
-//
-//       // Wraparound the ringbuffer offset
-//       if(decOffset >= DEC_BUFFER_BYTES - MESSAGE_MAX_BYTES)
-//         decOffset = 0;
-//     }
-//   }
-// }
+int test_decompress(char* out_buffer, const char* in_buffer)
+{
+  LZ4_streamDecode_t* lz4Stream = LZ4_createStreamDecode();
 
+  std::size_t inpOffset = 0;
+  std::size_t outOffset = 0;
 
+  for(;;) {
+    int cmpBytes;
+    int inpBytes;
+    char decBuf[CMPBUFSIZE];
+
+    {
+      inpBytes = *reinterpret_cast<const int *>(in_buffer + inpOffset);
+      inpOffset += sizeof(int);
+      Rcpp::Rcout << "Reading " << inpBytes << " bytes\n";
+      if (inpBytes <= 0)
+        break;
+    }
+
+    {
+      cmpBytes = LZ4_decompress_safe_continue(
+        lz4Stream,
+        in_buffer + inpOffset,
+        decBuf,
+        inpBytes,
+        MESSAGE_MAX_BYTES
+      );
+      Rcpp::Rcout << "Decompressed into " << cmpBytes << " bytes\n";
+      if(cmpBytes <= 0)
+        break;
+      inpOffset += inpBytes;
+
+      memcpy(out_buffer + outOffset, decBuf, cmpBytes);
+      outOffset += cmpBytes;
+    }
+  }
+  return outOffset;
+}
 
 // Parse a single hexadecimal character to its integer representation.
 int parse_hex_char(const char& c) {
@@ -243,37 +241,20 @@ public:
     FingerprintN n;
     in_stream.read(reinterpret_cast<char*>(&n), sizeof(FingerprintN));
     Rcpp::Rcout << "Reading " << n << " fingerprints from file\n";
-
-    int start_second_block;
-    in_stream.read(reinterpret_cast<char*>(&start_second_block), sizeof(int));
-    Rcpp::Rcout << "Names start at " << start_second_block << " bytes\n";
-
-    compressed_buffer.resize(file_size - in_stream.tellg());
-    in_stream.read(compressed_buffer.data(), compressed_buffer.size());
-    if (in_stream)
-      Rcpp::Rcout << "all characters read successfully.\n";
-    else
-      Rcpp::Rcout << "error: only " << in_stream.gcount() << " could be read\n";
-    in_stream.close();
-
-    Rcpp::Rcout << "Read file\n";
-
     fps.resize(n);
     fp_names.resize(n);
 
-    Rcpp::Rcout << "Resized\n";
+    int size_next_block;
+    in_stream.read(reinterpret_cast<char*>(&size_next_block), sizeof(int));
+    Rcpp::Rcout << "Fingerprint block has " << size_next_block << " bytes\n";
 
-    LZ4_streamDecode_t* decompress_stream = LZ4_createStreamDecode();
-
-    int bytes_decompressed;
-    bytes_decompressed = LZ4_decompress_safe_continue(
-      decompress_stream,
-      compressed_buffer.data(),
+    compressed_buffer.resize(size_next_block);
+    in_stream.read(compressed_buffer.data(), size_next_block);
+    Rcpp::Rcout << "Compressed fingerprints read\n";
+    int bytes_decompressed = test_decompress(
       reinterpret_cast<char*>(fps.data()),
-      start_second_block,
-      n * sizeof(Fingerprint)
+      compressed_buffer.data()
     );
-    Rcpp::Rcout << "Decompressed fingerprints\n";
     if (bytes_decompressed != n * sizeof(Fingerprint)) {
       Rcpp::stop(
         "Decompression error in fingerprints:\nExpected bytes: %i\nReceived bytes: %i",
@@ -281,26 +262,25 @@ public:
         bytes_decompressed
       );
     }
+    Rcpp::Rcout << "Fingerprints decompressed\n";
 
-    bytes_decompressed = LZ4_decompress_safe_continue(
-      decompress_stream,
-      compressed_buffer.data() + start_second_block,
+    in_stream.read(reinterpret_cast<char*>(&size_next_block), sizeof(int));
+    Rcpp::Rcout << "Names block has " << size_next_block << " bytes\n";
+
+    compressed_buffer.resize(size_next_block);
+    in_stream.read(compressed_buffer.data(), size_next_block);
+    bytes_decompressed = test_decompress(
       reinterpret_cast<char*>(fp_names.data()),
-      compressed_buffer.size() - start_second_block,
-      n * sizeof(FingerprintName)
+      compressed_buffer.data()
     );
-    Rcpp::Rcout << "Decompressed names\n";
     if (bytes_decompressed != n * sizeof(FingerprintName)) {
       Rcpp::stop(
-        "Decompression error in names\nReading from: %p\nReading to: %p\nExpected bytes: %i\nReceived bytes: %i",
-        compressed_buffer.data() + start_second_block,
-        compressed_buffer.data() + compressed_buffer.size(),
-        n * sizeof(FingerprintName),
+        "Decompression error in names:\nExpected bytes: %i\nReceived bytes: %i",
+        n * sizeof(Fingerprint),
         bytes_decompressed
       );
     }
-
-    LZ4_freeStreamDecode(decompress_stream);
+    Rcpp::Rcout << "Names decompressed\n";
   }
 
   // Tanimoto similarity between drugs i and j
@@ -393,6 +373,9 @@ public:
     return fps.size() * sizeof(Fingerprint);
   }
 
+  std::vector<Fingerprint> fps;
+  std::vector<FingerprintName> fp_names;
+
 private:
 
   Fingerprint& fp_index(FingerprintName &x) {
@@ -402,8 +385,6 @@ private:
     return fps.at(fp_pt - fp_names.begin());
   }
 
-  std::vector<Fingerprint> fps;
-  std::vector<FingerprintName> fp_names;
 };
 
 // Expose all relevant classes through an Rcpp module
@@ -426,5 +407,7 @@ RCPP_MODULE(morgan_cpp) {
 	    "Save fingerprints to file in binary format")
     .method("save_file", (void (MorganFPS::*)(const std::string&)) (&MorganFPS::save_file),
 	    "Save fingerprints to file in binary format")
+    .field_readonly("fingerprints", &MorganFPS::fps)
+    .field_readonly("names", &MorganFPS::fp_names)
     ;
 }

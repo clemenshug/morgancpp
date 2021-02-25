@@ -79,10 +79,11 @@ test_that("Collection indexing is 1-based", {
 })
 
 test_that("Collections can be saved to and loaded from binary files", {
-    v <- load_example1(100)
+    v <- load_example1(500)
     m <- MorganFPS$new(v)
     tmp <- tempfile()
     m$save_file(tmp)
+    browser()
     expect_gt(file.size(tmp), 5000)
     m2 <- MorganFPS$new(tmp, from_file = TRUE)
     expect_equal(m2$size(), 25600)
