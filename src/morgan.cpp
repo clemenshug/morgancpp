@@ -13,7 +13,7 @@ using FingerprintName = std::int32_t;
 using FingerprintN = std::uint64_t;
 
 enum {
-  MESSAGE_MAX_BYTES   = 1024 * 1024
+  MESSAGE_MAX_BYTES   = 1024 * 64
 };
 
 #define CMPBUFSIZE (LZ4_COMPRESSBOUND(MESSAGE_MAX_BYTES))
@@ -70,7 +70,7 @@ int lz4_decompress(char* out_buffer, const char* in_buffer)
   std::size_t inpOffset = 0;
   std::size_t outOffset = 0;
   static char decBuf[DECODER_RING_BUFFER_SIZE];
-  std::size_t decBufOffset = 5;
+  std::size_t decBufOffset = 0;
 
   // Rcpp::Rcout << "Using a " << DECODER_RING_BUFFER_SIZE << " byte decoding ring buffer\n";
 
